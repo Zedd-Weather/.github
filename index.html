@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zedd Weather – Your On-Site Weather Partner</title>
+  <meta name="description" content="Zedd Weather builds open-source edge telemetry and risk-analysis tools for industrial, agricultural, and construction monitoring — running on Raspberry Pi hardware, no cloud required." />
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0b1220;
+      color: #e2e8f0;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated sky / star canvas ──────────────────────────── */
+    #sky {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Layout helpers ───────────────────────────────────────── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
+    .section   { position: relative; z-index: 1; padding: 5rem 0; }
+
+    /* ── Navigation ───────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(11, 18, 32, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(99, 179, 237, 0.15);
+    }
+    nav .inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+      padding: 0 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #63b3ed;
+      text-decoration: none;
+    }
+    .nav-logo svg { flex-shrink: 0; }
+    nav ul {
+      list-style: none;
+      display: flex;
+      gap: 2rem;
+    }
+    nav ul a {
+      color: #a0aec0;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color .2s;
+    }
+    nav ul a:hover { color: #63b3ed; }
+
+    /* ── Hero ──────────────────────────────────────────────────── */
+    #hero {
+      min-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 6rem 1.5rem 4rem;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(99, 179, 237, 0.12);
+      border: 1px solid rgba(99, 179, 237, 0.35);
+      color: #63b3ed;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 0.35rem 1rem;
+      border-radius: 100px;
+      margin-bottom: 1.6rem;
+    }
+    #hero h1 {
+      font-size: clamp(2.4rem, 6vw, 4.2rem);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 1.4rem;
+      background: linear-gradient(135deg, #ffffff 30%, #63b3ed 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    #hero p {
+      max-width: 620px;
+      font-size: 1.15rem;
+      color: #a0aec0;
+      margin-bottom: 2.4rem;
+    }
+    .btn-group { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.75rem 1.6rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform .2s, box-shadow .2s, background .2s;
+    }
+    .btn-primary {
+      background: #2b6cb0;
+      color: #fff;
+      border: 1px solid #3182ce;
+    }
+    .btn-primary:hover { background: #3182ce; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(49,130,206,.35); }
+    .btn-secondary {
+      background: transparent;
+      color: #e2e8f0;
+      border: 1px solid rgba(226,232,240,.25);
+    }
+    .btn-secondary:hover { background: rgba(226,232,240,.07); transform: translateY(-2px); }
+
+    /* ── Stats bar ─────────────────────────────────────────────── */
+    .stats-bar {
+      display: flex;
+      justify-content: center;
+      gap: 3rem;
+      flex-wrap: wrap;
+      margin-top: 3.5rem;
+      padding-top: 2.5rem;
+      border-top: 1px solid rgba(99,179,237,.15);
+    }
+    .stat { text-align: center; }
+    .stat strong { display: block; font-size: 1.9rem; font-weight: 800; color: #63b3ed; }
+    .stat span   { font-size: 0.82rem; color: #718096; text-transform: uppercase; letter-spacing: .07em; }
+
+    /* ── Section titles ────────────────────────────────────────── */
+    .section-title {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .section-title h2 {
+      font-size: clamp(1.7rem, 3.5vw, 2.4rem);
+      font-weight: 700;
+      margin-bottom: 0.7rem;
+    }
+    .section-title p { color: #718096; max-width: 540px; margin: 0 auto; }
+
+    /* ── Feature grid ──────────────────────────────────────────── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 12px;
+      padding: 1.6rem;
+      transition: border-color .25s, transform .25s;
+    }
+    .feature-card:hover { border-color: rgba(99,179,237,.4); transform: translateY(-3px); }
+    .feature-icon {
+      width: 44px; height: 44px;
+      background: rgba(99,179,237,.12);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1rem;
+      font-size: 1.4rem;
+    }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .45rem; }
+    .feature-card p  { font-size: 0.88rem; color: #718096; }
+
+    /* ── Repository cards ──────────────────────────────────────── */
+    .repo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 2rem;
+    }
+    .repo-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 14px;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      transition: border-color .25s, box-shadow .25s, transform .25s;
+    }
+    .repo-card:hover {
+      border-color: rgba(99,179,237,.5);
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+      transform: translateY(-4px);
+    }
+    .repo-header { display: flex; align-items: flex-start; gap: 1rem; }
+    .repo-icon {
+      width: 52px; height: 52px; flex-shrink: 0;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #2b6cb0, #1a365d);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem;
+    }
+    .repo-name { font-size: 1.25rem; font-weight: 700; color: #e2e8f0; }
+    .repo-subtitle { font-size: 0.82rem; color: #63b3ed; margin-top: .15rem; }
+    .repo-description { font-size: 0.9rem; color: #a0aec0; flex: 1; }
+    .repo-tags { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .tag {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: .25rem .7rem;
+      border-radius: 100px;
+      background: rgba(99,179,237,.12);
+      color: #63b3ed;
+      border: 1px solid rgba(99,179,237,.25);
+    }
+    .repo-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: .5rem;
+      flex-wrap: wrap;
+      gap: .75rem;
+    }
+    .repo-meta { display: flex; align-items: center; gap: 1rem; }
+    .repo-meta span { font-size: 0.8rem; color: #718096; display: flex; align-items: center; gap: .3rem; }
+    .repo-link {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #63b3ed;
+      text-decoration: none;
+      display: flex; align-items: center; gap: .3rem;
+      transition: gap .2s;
+    }
+    .repo-link:hover { gap: .55rem; }
+
+    /* ── Architecture section ──────────────────────────────────── */
+    .arch-diagram {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 14px;
+      padding: 2rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      color: #a0aec0;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.55;
+    }
+
+    /* ── Technology strip ──────────────────────────────────────── */
+    .tech-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    .tech-pill {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 8px;
+      padding: .55rem 1.1rem;
+      font-size: 0.85rem;
+      color: #cbd5e0;
+      display: flex; align-items: center; gap: .45rem;
+    }
+
+    /* ── CTA banner ────────────────────────────────────────────── */
+    .cta-banner {
+      background: linear-gradient(135deg, rgba(43,108,176,.35), rgba(26,54,93,.5));
+      border: 1px solid rgba(99,179,237,.25);
+      border-radius: 16px;
+      padding: 3.5rem 2rem;
+      text-align: center;
+    }
+    .cta-banner h2 { font-size: clamp(1.5rem,3vw,2.2rem); font-weight: 700; margin-bottom: .8rem; }
+    .cta-banner p  { color: #a0aec0; max-width: 500px; margin: 0 auto 2rem; }
+
+    /* ── Footer ────────────────────────────────────────────────── */
+    footer {
+      position: relative; z-index: 1;
+      border-top: 1px solid rgba(255,255,255,.07);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      color: #4a5568;
+      font-size: 0.85rem;
+    }
+    footer a { color: #63b3ed; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Responsive ────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      nav ul { display: none; }
+      .stats-bar { gap: 1.5rem; }
+      .arch-diagram { font-size: 0.7rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Animated starfield -->
+<canvas id="sky"></canvas>
+<script>
+(function () {
+  const c = document.getElementById('sky');
+  const ctx = c.getContext('2d');
+  let W, H, stars = [];
+  const N = 180;
+  function resize() {
+    W = c.width  = window.innerWidth;
+    H = c.height = window.innerHeight;
+    stars = Array.from({length: N}, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 1.2 + 0.3,
+      a: Math.random(),
+      s: Math.random() * 0.003 + 0.001
+    }));
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    stars.forEach(st => {
+      st.a += st.s;
+      if (st.a > 1 || st.a < 0) st.s *= -1;
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200,220,255,${st.a * 0.7})`;
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+</script>
+
+<!-- Navigation -->
+<nav>
+  <div class="inner">
+    <a class="nav-logo" href="#hero">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#63b3ed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/>
+      </svg>
+      Zedd Weather
+    </a>
+    <ul>
+      <li><a href="#projects">Projects</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#tech">Tech&nbsp;Stack</a></li>
+      <li><a href="https://github.com/Zedd-Weather" target="_blank" rel="noopener">GitHub&nbsp;↗</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section id="hero">
+  <div class="hero-badge">Open-Source · Edge Computing · Raspberry Pi</div>
+  <h1>Your On-Site<br>Weather Partner</h1>
+  <p>Zedd Weather builds edge-first, open-source tools that collect, analyse,
+     and act on real weather data — no cloud round-trip required.</p>
+  <div class="btn-group">
+    <a class="btn btn-primary" href="#projects">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77A5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+      Explore Projects
+    </a>
+    <a class="btn btn-secondary" href="https://github.com/Zedd-Weather" target="_blank" rel="noopener">
+      View Organisation ↗
+    </a>
+  </div>
+
+  <div class="stats-bar container">
+    <div class="stat"><strong>2</strong><span>Repositories</span></div>
+    <div class="stat"><strong>Python</strong><span>Primary Language</span></div>
+    <div class="stat"><strong>MIT</strong><span>License</span></div>
+    <div class="stat"><strong>Edge</strong><span>No Cloud Required</span></div>
+  </div>
+</section>
+
+<!-- Projects -->
+<section id="projects" class="section" style="background:rgba(255,255,255,.015);">
+  <div class="container">
+    <div class="section-title">
+      <h2>Our Projects</h2>
+      <p>Two complementary repositories that form a complete, open-source
+         weather data platform.</p>
+    </div>
+
+    <div class="repo-grid">
+      <!-- Zedd-Weather -->
+      <div class="repo-card">
+        <div class="repo-header">
+          <div class="repo-icon">🌩️</div>
+          <div>
+            <div class="repo-name">Zedd-Weather</div>
+            <div class="repo-subtitle">Edge Telemetry &amp; Risk-Analysis Dashboard</div>
+          </div>
+        </div>
+        <p class="repo-description">
+          A full-stack edge platform running on a Raspberry Pi cluster.
+          Combines real sensor hardware, on-device AI inference (Hailo-8L NPU),
+          an MQTT telemetry pipeline, FastAPI backend, and a Dash/Plotly
+          dashboard to deliver site-specific weather intelligence for
+          industrial, agricultural, and construction operations.
+        </p>
+        <div class="repo-tags">
+          <span class="tag">Python</span>
+          <span class="tag">Dash / Plotly</span>
+          <span class="tag">FastAPI</span>
+          <span class="tag">MQTT</span>
+          <span class="tag">Hailo NPU</span>
+          <span class="tag">Docker</span>
+          <span class="tag">Raspberry Pi</span>
+        </div>
+        <div class="repo-footer">
+          <div class="repo-meta">
+            <span>⭐ 1</span>
+            <span>🔤 Python</span>
+            <span>📄 MIT</span>
+          </div>
+          <a class="repo-link" href="https://github.com/Zedd-Weather/Zedd-Weather" target="_blank" rel="noopener">
+            View repository →
+          </a>
+        </div>
+      </div>
+
+      <!-- Zedd-Satellite -->
+      <div class="repo-card">
+        <div class="repo-header">
+          <div class="repo-icon">🛰️</div>
+          <div>
+            <div class="repo-name">Zedd-Satellite</div>
+            <div class="repo-subtitle">GIS Satellite Ground Station</div>
+          </div>
+        </div>
+        <p class="repo-description">
+          A Raspberry Pi–based ground station that automatically tracks,
+          captures, and decodes imagery from polar-orbiting weather
+          satellites (NOAA 15/18/19 APT and Meteor-M2 LRPT) using an
+          RTL-SDR dongle. Schedules passes via TLE data, records FM audio,
+          and decodes it into satellite imagery — all autonomously.
+        </p>
+        <div class="repo-tags">
+          <span class="tag">Python</span>
+          <span class="tag">RTL-SDR</span>
+          <span class="tag">GIS</span>
+          <span class="tag">NOAA Satellite</span>
+          <span class="tag">LoRa</span>
+          <span class="tag">GPS</span>
+          <span class="tag">Raspberry Pi</span>
+        </div>
+        <div class="repo-footer">
+          <div class="repo-meta">
+            <span>⭐ 1</span>
+            <span>🔤 Python</span>
+            <span>📄 MIT</span>
+          </div>
+          <a class="repo-link" href="https://github.com/Zedd-Weather/Zedd-Satellite" target="_blank" rel="noopener">
+            View repository →
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features" class="section">
+  <div class="container">
+    <div class="section-title">
+      <h2>Platform Features</h2>
+      <p>Everything you need to monitor, analyse, and respond to
+         on-site weather conditions.</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔬</div>
+        <h3>Real Sensor Hardware</h3>
+        <p>BCRobotics Weather HAT PRO, SparkFun anemometer, wind vane, and
+           rain gauge — no synthetic or mock data, ever.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>On-Device AI Inference</h3>
+        <p>Hailo-8L NPU weather classifier plus local Ollama/Gemma for
+           mitigation guidance — completely offline.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📡</div>
+        <h3>MQTT Telemetry Pipeline</h3>
+        <p>Sensor readings flow through Mosquitto (auth-required) to the
+           control plane for real-time processing and storage in InfluxDB.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚠️</div>
+        <h3>Sector Risk Engines</h3>
+        <p>Three purpose-built engines for construction, agricultural, and
+           industrial operations with configurable alert thresholds.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛰️</div>
+        <h3>Satellite Imagery</h3>
+        <p>Auto-schedule and decode passes from NOAA 15/18/19 and
+           Meteor-M2 — from TLE orbital data to decoded PNG images.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Dash / Plotly Dashboard</h3>
+        <p>Rich interactive visualisations powered by Python Dash — no
+           Node.js runtime, no npm build step.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🐳</div>
+        <h3>Docker &amp; Cluster-Ready</h3>
+        <p>Single-host or three-node cluster deployment via Docker Compose
+           with multi-arch (arm64 + amd64) images.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📻</div>
+        <h3>LoRa Heartbeat Telemetry</h3>
+        <p>SX1262 LoRa HAT broadcasts a compact JSON health snapshot every
+           configurable interval — useful for off-grid monitoring.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>Privacy &amp; Security First</h3>
+        <p>All third-party API keys stay server-side. The browser never
+           sees credentials. CodeQL and CI scanning on every push.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section id="architecture" class="section" style="background:rgba(255,255,255,.015);">
+  <div class="container">
+    <div class="section-title">
+      <h2>System Architecture</h2>
+      <p>A three-node Raspberry Pi cluster where every layer has a
+         clear, single responsibility.</p>
+    </div>
+
+    <pre class="arch-diagram">
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                     Node C  – Sensory Worker                        │
+  │                                                                     │
+  │   BCRobotics Weather HAT PRO   Sense HAT (opt)   Enviro+/UV/Modbus  │
+  │              \                      |                  /            │
+  │               └──&gt; SensorManager.read_all() ──&gt; MQTT publish        │
+  │                                                                     │
+  │                    Zedd-Satellite Ground Station                    │
+  │   RTL-SDR ──&gt; rtl_fm ──&gt; wxtoimg / meteor-demod ──&gt; PNG images      │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │  MQTT (Mosquitto, auth-required)
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                     Node B  – AI Worker                             │
+  │                                                                     │
+  │   MQTT subscriber ──&gt; Hailo-8L NPU classifier (HEF model)           │
+  │                   ──&gt; Ollama / Gemma local mitigation guidance      │
+  │                   ──&gt; Re-publish enriched payload                   │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │              Node A  – Control Plane + Storage + UI                 │
+  │                                                                     │
+  │   FastAPI (port 8000)     /api/telemetry   /api/weather             │
+  │                           /api/analyze     /api/alerts              │
+  │                                                                     │
+  │   Dash + Plotly dashboard (port 8050) ──────── user browser         │
+  │   InfluxDB (port 8086)   Grafana (3000)   Open WebUI (8080)         │
+  └─────────────────────────────────────────────────────────────────────┘
+</pre>
+  </div>
+</section>
+
+<!-- Tech Stack -->
+<section id="tech" class="section">
+  <div class="container">
+    <div class="section-title">
+      <h2>Technology Stack</h2>
+      <p>Built entirely on open-source tools and proven embedded hardware.</p>
+    </div>
+
+    <div class="tech-strip">
+      <div class="tech-pill">🐍 Python 3.9+</div>
+      <div class="tech-pill">⚡ FastAPI</div>
+      <div class="tech-pill">📈 Dash &amp; Plotly</div>
+      <div class="tech-pill">📡 MQTT / Mosquitto</div>
+      <div class="tech-pill">🗄️ InfluxDB</div>
+      <div class="tech-pill">📊 Grafana</div>
+      <div class="tech-pill">🧠 Hailo-8L NPU</div>
+      <div class="tech-pill">🤖 Ollama / Gemma</div>
+      <div class="tech-pill">🐳 Docker Compose</div>
+      <div class="tech-pill">📻 RTL-SDR</div>
+      <div class="tech-pill">🛰️ wxtoimg</div>
+      <div class="tech-pill">🌍 GIS / TLE Orbital</div>
+      <div class="tech-pill">📡 LoRa SX1262</div>
+      <div class="tech-pill">🔭 NOAA APT / Meteor LRPT</div>
+      <div class="tech-pill">🍓 Raspberry Pi 5</div>
+      <div class="tech-pill">🔒 CodeQL + CI/CD</div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="section">
+  <div class="container">
+    <div class="cta-banner">
+      <h2>Ready to deploy your own station?</h2>
+      <p>Both projects are open-source under the MIT licence. Clone a repo,
+         wire up your hardware, and you're capturing real weather data in
+         minutes.</p>
+      <div class="btn-group">
+        <a class="btn btn-primary" href="https://github.com/Zedd-Weather/Zedd-Weather" target="_blank" rel="noopener">
+          Get Zedd-Weather ↗
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/Zedd-Weather/Zedd-Satellite" target="_blank" rel="noopener">
+          Get Zedd-Satellite ↗
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <p>
+      © 2025 <a href="https://github.com/Zedd-Weather" target="_blank" rel="noopener">Zedd Weather Organisation</a>
+      · Open-source under the
+      <a href="https://github.com/Zedd-Weather/Zedd-Weather/blob/main/LICENSE" target="_blank" rel="noopener">MIT Licence</a>
+      · Built with ❤️ on Raspberry Pi
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
