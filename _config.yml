@@ -1,0 +1,14 @@
+title: Zedd Weather
+description: >-
+  Zedd Weather builds open-source edge telemetry and risk-analysis tools for
+  industrial, agricultural, and construction monitoring — running on Raspberry
+  Pi hardware, no cloud required.
+
+# Use the GitHub Pages gem so the site builds with the same dependencies as
+# the `actions/jekyll-build-pages` action used in the deployment workflow.
+plugins:
+  - jekyll-seo-tag
+
+exclude:
+  - README.md
+  - .github
